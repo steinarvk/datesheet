@@ -1,18 +1,30 @@
 use anyhow::anyhow;
+use axum::routing::get;
+use axum::{
+    http::StatusCode,
+    response::{AppendHeaders, IntoResponse, Response},
+    Router,
+};
 use printpdf::*;
 use std::fs::File;
-use std::io::prelude::*;
 use std::io::BufWriter;
+use std::net::SocketAddr;
 use time::{Date, Month, Weekday};
+use tower_http::trace::{DefaultOnRequest, DefaultOnResponse, TraceLayer};
+use tracing::Level;
+use tracing_subscriber::prelude::*;
+use tracing_subscriber::Layer;
 
 type Result<T> = std::result::Result<T, anyhow::Error>;
+
+struct ServerError(anyhow::Error);
 
 struct PageSize {
     width_mm: f64,
     height_mm: f64,
 }
 
-fn generate_pdf_for_date(
+async fn generate_pdf_for_date(
     start_date: &Date,
     page_size: &PageSize,
     font_filename: &str,
@@ -21,7 +33,7 @@ fn generate_pdf_for_date(
     let page_height = page_size.height_mm;
 
     let (doc, page1, layer1) = PdfDocument::new(
-        "PDF_Document_title",
+        format!("Datesheet_{}", start_date),
         Mm(page_width),
         Mm(page_height),
         "Layer 1",
@@ -244,7 +256,14 @@ fn generate_pdf_for_date(
     Ok(buf.into_inner()?)
 }
 
-fn main() -> Result<()> {
+impl IntoResponse for ServerError {
+    fn into_response(self) -> Response {
+        let body = format!("error: {}", self.0);
+        (StatusCode::INTERNAL_SERVER_ERROR, body).into_response()
+    }
+}
+
+async fn generate_pdf() -> Result<Vec<u8>> {
     let a4_landscape = PageSize {
         width_mm: 297.0,
         height_mm: 210.0,
@@ -256,10 +275,45 @@ fn main() -> Result<()> {
         &start_date,
         &a4_landscape,
         "fonts/LiberationSans-Regular.ttf",
-    )?;
+    )
+    .await?;
 
-    let mut file = File::create("output.pdf")?;
-    file.write_all(&data)?;
+    Ok(data)
+}
 
-    Ok(())
+async fn generate_pdf_handler() -> impl IntoResponse {
+    match generate_pdf().await {
+        Ok(pdf_data) => Ok((
+            AppendHeaders([(http::header::CONTENT_TYPE, "application/pdf")]),
+            pdf_data,
+        )),
+        Err(err) => Err(ServerError(err)),
+    }
+}
+
+#[tokio::main]
+async fn main() {
+    let filter = tracing_subscriber::filter::Targets::new()
+        .with_target("tower_http::trace::make_span", Level::DEBUG)
+        .with_default(Level::INFO);
+
+    let fmt_layer = tracing_subscriber::fmt::layer();
+
+    tracing_subscriber::registry()
+        .with(fmt_layer.with_filter(filter))
+        .init();
+
+    let app = Router::new().route("/", get(generate_pdf_handler)).layer(
+        TraceLayer::new_for_http()
+            .on_request(DefaultOnRequest::new().level(Level::INFO))
+            .on_response(DefaultOnResponse::new().level(Level::INFO)),
+    );
+
+    let addr = SocketAddr::from(([127, 0, 0, 1], 8000));
+    tracing::info!("listening on {}", addr);
+
+    axum::Server::bind(&addr)
+        .serve(app.into_make_service())
+        .await
+        .unwrap();
 }
