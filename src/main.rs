@@ -1,4 +1,5 @@
 use anyhow::anyhow;
+use axum::extract::Path;
 use axum::routing::get;
 use axum::{
     http::StatusCode,
@@ -258,21 +259,31 @@ impl IntoResponse for ServerError {
     }
 }
 
-async fn generate_pdf() -> Result<Vec<u8>> {
+async fn generate_pdf(year: i32, month: i32) -> Result<Vec<u8>> {
+    let month: Month = (month as u8).try_into()?;
+
     let a4_landscape = PageSize {
         width_mm: 297.0,
         height_mm: 210.0,
     };
 
-    let start_date = Date::from_calendar_date(2023, Month::January, 1)?;
+    let start_date = Date::from_calendar_date(year, month, 1)?;
 
     let data = generate_pdf_for_date(&start_date, &a4_landscape).await?;
 
     Ok(data)
 }
 
-async fn generate_pdf_handler() -> impl IntoResponse {
-    match generate_pdf().await {
+async fn redirect_to_current_month_handler() -> impl IntoResponse {
+    let now = time::OffsetDateTime::now_utc();
+    let year = now.year();
+    let month = now.month() as u8;
+    let url = format!("/{:04}/{:02}", year, month);
+    axum::response::Redirect::to(&url)
+}
+
+async fn generate_pdf_handler(Path((year, month)): Path<(i32, i32)>) -> impl IntoResponse {
+    match generate_pdf(year, month).await {
         Ok(pdf_data) => Ok((
             AppendHeaders([(http::header::CONTENT_TYPE, "application/pdf")]),
             pdf_data,
@@ -293,11 +304,14 @@ async fn main() {
         .with(fmt_layer.with_filter(filter))
         .init();
 
-    let app = Router::new().route("/", get(generate_pdf_handler)).layer(
-        TraceLayer::new_for_http()
-            .on_request(DefaultOnRequest::new().level(Level::INFO))
-            .on_response(DefaultOnResponse::new().level(Level::INFO)),
-    );
+    let app = Router::new()
+        .route("/", get(redirect_to_current_month_handler))
+        .route("/:year/:month", get(generate_pdf_handler))
+        .layer(
+            TraceLayer::new_for_http()
+                .on_request(DefaultOnRequest::new().level(Level::INFO))
+                .on_response(DefaultOnResponse::new().level(Level::INFO)),
+        );
 
     let addr = SocketAddr::from(([127, 0, 0, 1], 8000));
     tracing::info!("listening on {}", addr);
