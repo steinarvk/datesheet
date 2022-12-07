@@ -1,4 +1,4 @@
-use anyhow::anyhow;
+use anyhow::{anyhow, bail};
 use axum::extract::Path;
 use axum::routing::get;
 use axum::{
@@ -283,9 +283,11 @@ async fn redirect_to_current_month_handler() -> impl IntoResponse {
 }
 
 async fn generate_pdf_handler(Path((year, month)): Path<(i32, i32)>) -> impl IntoResponse {
+    let content_disposition = format!("filename=\"datesheet-{:04}-{:02}.pdf\"", year, month);
     match generate_pdf(year, month).await {
         Ok(pdf_data) => Ok((
             AppendHeaders([(http::header::CONTENT_TYPE, "application/pdf")]),
+            AppendHeaders([(http::header::CONTENT_DISPOSITION, content_disposition)]),
             pdf_data,
         )),
         Err(err) => Err(ServerError(err)),
@@ -293,7 +295,11 @@ async fn generate_pdf_handler(Path((year, month)): Path<(i32, i32)>) -> impl Int
 }
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<()> {
+    let port = std::env::var("PORT")
+        .unwrap_or("8000".to_string())
+        .parse::<u16>()?;
+
     let filter = tracing_subscriber::filter::Targets::new()
         .with_target("tower_http::trace::make_span", Level::DEBUG)
         .with_default(Level::INFO);
@@ -313,11 +319,12 @@ async fn main() {
                 .on_response(DefaultOnResponse::new().level(Level::INFO)),
         );
 
-    let addr = SocketAddr::from(([127, 0, 0, 1], 8000));
+    let addr = SocketAddr::from(([0, 0, 0, 0], port));
     tracing::info!("listening on {}", addr);
 
     axum::Server::bind(&addr)
         .serve(app.into_make_service())
-        .await
-        .unwrap();
+        .await?;
+
+    bail!("never expected serve() to finish!");
 }
