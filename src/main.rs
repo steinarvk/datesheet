@@ -6,7 +6,6 @@ use axum::{
     Router,
 };
 use printpdf::*;
-use std::fs::File;
 use std::io::BufWriter;
 use std::net::SocketAddr;
 use time::{Date, Month, Weekday};
@@ -24,11 +23,9 @@ struct PageSize {
     height_mm: f64,
 }
 
-async fn generate_pdf_for_date(
-    start_date: &Date,
-    page_size: &PageSize,
-    font_filename: &str,
-) -> Result<Vec<u8>> {
+const FONT_DATA: &[u8] = include_bytes!("../fonts/minimal.Roboto.ttf");
+
+async fn generate_pdf_for_date(start_date: &Date, page_size: &PageSize) -> Result<Vec<u8>> {
     let page_width = page_size.width_mm;
     let page_height = page_size.height_mm;
 
@@ -60,9 +57,7 @@ async fn generate_pdf_for_date(
     let column_header_offset_x = 1.0;
     let column_header_offset_y = (column_label_height - column_label_font_size_mm) / 2.0;
 
-    let font_file = File::open(font_filename)?;
-
-    let font = doc.add_external_font(font_file)?;
+    let font = doc.add_external_font(FONT_DATA)?;
 
     let page_padding = 5.0;
     let cell_padding = 1.0;
@@ -271,12 +266,7 @@ async fn generate_pdf() -> Result<Vec<u8>> {
 
     let start_date = Date::from_calendar_date(2023, Month::January, 1)?;
 
-    let data = generate_pdf_for_date(
-        &start_date,
-        &a4_landscape,
-        "fonts/LiberationSans-Regular.ttf",
-    )
-    .await?;
+    let data = generate_pdf_for_date(&start_date, &a4_landscape).await?;
 
     Ok(data)
 }
