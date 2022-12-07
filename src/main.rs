@@ -297,14 +297,14 @@ async fn generate_pdf_handler(Path((year, month)): Path<(i32, i32)>) -> impl Int
 #[tokio::main]
 async fn main() -> Result<()> {
     let port = std::env::var("PORT")
-        .unwrap_or("8000".to_string())
+        .unwrap_or_else(|_| "8000".to_string())
         .parse::<u16>()?;
 
     let filter = tracing_subscriber::filter::Targets::new()
         .with_target("tower_http::trace::make_span", Level::DEBUG)
         .with_default(Level::INFO);
 
-    let fmt_layer = tracing_subscriber::fmt::layer();
+    let fmt_layer = tracing_subscriber::fmt::layer().json();
 
     tracing_subscriber::registry()
         .with(fmt_layer.with_filter(filter))
