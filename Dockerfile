@@ -2,7 +2,7 @@ FROM clux/muslrust:stable as builder
 
 WORKDIR /build/
 
-RUN mkdir src && echo "fn main() {print!(\"New dummy main\");} // dummy file" > src/main.rs
+RUN mkdir src && echo "fn main() {print!(\"Hello world\");} // dummy file" > src/main.rs
 COPY Cargo.lock Cargo.toml /build/
 RUN cargo build --target x86_64-unknown-linux-musl --release && rm ./target/x86_64-unknown-linux-musl/release/datesheet
 
